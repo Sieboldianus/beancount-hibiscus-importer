@@ -1,0 +1,15 @@
+;; Account: Assets:EUR:Hibiscus
+;; Date: 2024-12-24
+;; Name: hibiscus.mv.db
+
+2023-12-11 * "Umbuchung             DATUM 11.12.2023, 06.23 UHR"
+  huid: "21"
+  Assets:EUR:DKB:Giro  -10000.0 EUR
+
+2023-12-11 * "LAG INTERNET SERVICES GMB FIBU 52344 RENR 3021233243280"
+  huid: "22"
+  Assets:EUR:DKB:Giro  -23.94 EUR
+
+2023-12-29 * "2023-12-28T07:24      Debitk.00 2099-12 Zahl.System VISA Debit"
+  huid: "3"
+  Assets:EUR:DKB:Giro  -3.69 EUR
