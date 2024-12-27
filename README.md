@@ -1,6 +1,6 @@
 # Beancount Hibiscus Importer
 
-[Hibiscus](https://github.com/willuhn/hibiscus) is a widely used open source software in Germany. It supports the retrieval of transactions from banks using the HBCI or FinTS standards and (with plugins) via web scraping (credit cards) or APIs (e.g. Paypal). This **Beancount Hibiscus Importer** provides import functionality to retrieve transactions from the Hibiscus H2DB and convert them to the Beancount format using the v3 [Beangulp](https://github.com/beancount/beangulp) interface.
+[Hibiscus](https://github.com/willuhn/hibiscus) is a widely used open source software in Germany. It supports the retrieval of transactions from banks using the HBCI or FinTS standards and (with plugins) via web scraping (credit cards) or APIs (e.g. Paypal). This **Beancount Hibiscus Importer** provides import functionality to retrieve transactions from the Hibiscus H2DB (either directly or via XML-RPC) and convert them to the Beancount format using the v3 [Beangulp](https://github.com/beancount/beangulp) interface.
 
 -----
 
@@ -58,8 +58,26 @@ python import.py extract ./downloads > tmp.beancount
 - **Account Mappings**: Multiple Hibiscus Accounts are mapped to Beancount accounts through [hibiscus/.accounts](hibiscus/.accounts).
 - **Balances** and **Transactions** are currently imported from Hibiscus
 - The Hibiscus H2 DB is opened in read-only mode.
+- Choose either `H2`, to query the Hibiscus database directly, or `RPC`, to query via the Hibiscus XML-RPC interface (see below)
 
 
 **Not implemented**: If you use Hibiscus to categorize transactions, these categories are not yet used to categorize the second leg of beancount transactions (e.g. expense accounts).
 
 **Language conventions**: The code is primarily written in English. All references to Hibiscus (e.g. H2 column names) are kept in German.
+
+## XML-RPC
+
+Query of automated transaction categories from Hibiscus is only possible via XML-RPC protocol, 
+as automated categories are not stored in the H2 itself. See [the documentation](https://www.willuhn.de/wiki/doku.php?id=develop:xmlrpc).
+
+Setup:
+
+Datei > Einstellungen > Verfügbare Plugins > `<Alle Repositories>` auswählen
+- `hibiscus.xmlrpc` finden und installieren, installiert dependencies:
+    - `jameica.webadmin`
+    - `jameica.xmlrpc`
+
+Datei > Einstellungen > HTTP
+- Server binden an: `127.0.0.1`
+- no HTTPS
+- no auth

@@ -6,12 +6,13 @@ __license__ = "GNU GPLv2"
 
 
 import csv
+import xmlrpc.client
 import datetime
 import decimal
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, List
 
 import beangulp
 import jaydebeapi
@@ -22,7 +23,7 @@ from dotenv import load_dotenv
 # Configure logging
 # Set logging.DEBUG or logging.INFO to increase verbosity
 logging.basicConfig(
-    level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 # supress DeprecationWarning in imported package jpype
@@ -36,12 +37,14 @@ class Importer(beangulp.Importer):
         self,
         importer_account,
         processed_huids: Optional[str] = None,
+        source: Optional[str] = None,
     ):
         """Create a new importer posting to the given H2DB.
 
         Args:
-          account: An optional account string, to filter from the H2DB
+          importer_account: An optional account string that is not relevant currently
           processed_huids: An optional filepath, with hibiscus uids already processed.
+          source: specify whether to query from H2 database or via XML-RPC
         """
         # Credentials and JAR path and other parameters from .env
         load_dotenv()
@@ -49,6 +52,10 @@ class Importer(beangulp.Importer):
         # define hibiscus account IDs to filter
         self.hibiscus_account_ids: Dict[int, str] = get_accounts()
         self.processed_huids = get_processed_huids(processed_huids)
+        self.source: str = "H2"
+        # self.source: str = "RPC"
+        if source is not None:
+            self.source = source
 
     def date(self, filepath):
         """Implement beangulp.Importer::date()"""
@@ -69,35 +76,72 @@ class Importer(beangulp.Importer):
 
     def extract(self, filepath, existing):
         """Extract a list of transactions from the H2 DB."""
-        with connect_h2(filepath) as conn:
-            curs = conn.cursor()
-            sql_str = f"""
-                SELECT *
-                FROM HIBISCUS.PUBLIC.UMSATZ
-                WHERE KONTO_ID in (
-                {','.join([str(n) for n in self.hibiscus_account_ids])}
-                )
-                ORDER BY ID ASC
-                LIMIT 300
-                """
-            # input(sql_str)
-            curs.execute(sql_str)
-            rows = curs.fetchall()
-            # input(rows)
-            # get column names
-            num_fields = len(curs.description)
-            if num_fields != 27:
-                raise Warning(
-                    "Number of columns is not 27 (expected). Check H2 database."
-                )
-            field_names: Dict[str, int] = {
-                i[0]: ix for ix, i in enumerate(curs.description)
-            }
-            curs.close()
-        return extract_transactions(rows, field_names, self.hibiscus_account_ids)
+        if self.source == "RPC":
+            transactions_raw = get_from_rpc(
+                hibiscus_account_ids=self.hibiscus_account_ids
+            )
+        elif self.source == "H2":
+            transactions_raw = get_from_h2(filepath, self.hibiscus_account_ids)
+        else:
+            raise ValueError(f"Source {self.source} not supported.")
+        return extract_transactions(transactions_raw, self.hibiscus_account_ids)
 
 
-def extract_transactions(rows, field_names: Dict[str, int], hibiscus_account_ids):
+def get_from_rpc(
+    server_url: Optional[str] = None,
+    hibiscus_account_ids: Optional[Dict[int, str]] = None,
+):
+    """Get Hibiscus transactions via XML-RPC. This method supports importing
+    automatic Hibiscus categories."""
+    rows = connect_rpc()
+    return rows
+
+
+def get_from_h2(
+    filepath, hibiscus_account_ids
+) -> List[Dict[str, Union[str, int, float]]]:
+    """Get Hibiscus transactions from H2 db. This method does not support importing
+    categories.
+    Args:
+        filepath: Path to H2 DB
+        hibiscus_account_ids: Account IDs to filter"""
+    with connect_h2(filepath) as conn:
+        curs = conn.cursor()
+        sql_str = f"""
+            SELECT *
+            FROM HIBISCUS.PUBLIC.UMSATZ
+            WHERE KONTO_ID in (
+            {','.join([str(n) for n in hibiscus_account_ids])}
+            )
+            ORDER BY ID ASC
+            LIMIT 300
+            """
+
+        curs.execute(sql_str)
+        rows = curs.fetchall()
+
+        # get column names
+        num_fields = len(curs.description)
+        if num_fields != 27:
+            raise Warning("Number of columns is not 27 (expected). Check H2 database.")
+        field_names: Dict[str, int] = {
+            i[0]: ix for ix, i in enumerate(curs.description)
+        }
+        field_names = [ix[0] for ix in curs.description]
+        curs.close()
+        transactions_raw = build_dict(rows, field_names)
+    return transactions_raw
+
+
+def build_dict(rows, field_names):
+    """Build a list of dictionaries from a list of column names and rows (tuples).
+    Keys will be converted to lowercase, to match the XML-RTC returned style
+    """
+    field_names = [key.lower() for key in field_names]
+    return [dict(zip(field_names, values)) for values in rows]
+
+
+def extract_transactions(rows, hibiscus_account_ids):
     """Extract transactions from an Hibiscus H2DB.
 
     Args:
@@ -113,31 +157,41 @@ def extract_transactions(rows, field_names: Dict[str, int], hibiscus_account_ids
     total_items = len(rows)
     logging.info("Starting to process %d items.", total_items)
     for cnt, row in enumerate(rows):
-        col_num = field_names.get("ID")
-        uid = row[col_num]
+        uid = row.get("id")
         logging.debug("Processing item %d of %d, row UID: %s", cnt, total_items, uid)
         # test whether it is a balance or transaction
-        amount_num = row[field_names.get("BETRAG")]
-        balance = row[field_names.get("SALDO")]
-        hibiscus_account_id = row[field_names.get("KONTO_ID")]
+        amount_num = row.get("betrag")
+        balance = row.get("saldo")
+        hibiscus_account_id = int(row.get("konto_id"))
         bean_account = hibiscus_account_ids.get(hibiscus_account_id)
+
+        amount_num = fix_regional(amount_num)
+        balance = fix_regional(balance)
+
         if bean_account is None:
             # skip entry
             continue
-        if amount_num == 0 and balance != 0:
+        # convert over float to int, to prevent
+        # ValueError: invalid literal for int() with base 10
+        if int(float(amount_num)) == 0 and float(balance) > 0:
             # create balance entry
             logging.debug("Processing balance entry")
-            date_str = row[field_names.get("DATUM")]
+            date_str = row.get("datum")
             date = parse_hibiscus_time(date_str).date()
-            balance = row[field_names.get("SALDO")]
+            balance = row.get("saldo")
             balance_dec = decimal.Decimal(str(balance))
             units = amount.Amount(balance_dec, "EUR")
+            # Build the transaction with a single leg.
+            meta = data.new_metadata("<build_transaction>", 0)
+            # add hibiscus unique transaction id as metadata
             meta = {"lineno": uid, "filename": "hibiscus"}
             balance_entry = data.Balance(meta, date, bean_account, units, None, None)
             new_entries.append(balance_entry)
+            # if int(uid) == 2952:
+            #     input(balance_entry)
             continue
         # process transaction
-        entry = build_transaction(row, field_names, hibiscus_account_ids)
+        entry = build_transaction(row, hibiscus_account_ids)
         new_entries.append(entry)
 
     logging.info("Finished processing all items.")
@@ -146,7 +200,6 @@ def extract_transactions(rows, field_names: Dict[str, int], hibiscus_account_ids
 
 def build_transaction(
     row: Tuple[Union[float, int, str]],
-    field_names: Dict[str, int],
     hibiscus_account_ids: Dict[int, str],
 ) -> data.Transaction:
     """Build a single transaction.
@@ -160,23 +213,27 @@ def build_transaction(
       A Transaction instance.
     """
 
-    uid = row[field_names.get("ID")]  # hibiscus unique id (cross-account)
-    hibiscus_account_id = row[field_names.get("KONTO_ID")]
-    name = row[field_names.get("EMPFAENGER_KONTO")]  # empfaenger_name
-    amount_num = row[field_names.get("BETRAG")]
-    narration = row[field_names.get("ZWECK")]
-    date_str = row[field_names.get("DATUM")]  # Buchungsdatum
+    uid = row.get("id")  # hibiscus unique id (cross-account)
+    hibiscus_account_id = int(row.get("konto_id"))
+    name = row.get("empfaenger_konto")  # empfaenger_name
+    amount_num = row.get("betrag")
+    narration = row.get("zweck")
+    date_str = row.get("datum")  # Buchungsdatum
     # payee =                 # empfaenger_name
 
     # Create Transaction directives.
     bean_account = hibiscus_account_ids.get(hibiscus_account_id)
+
     currency = "EUR"
-    # if not acctid_regexp == acctid:
-    #     continue
 
     date = parse_hibiscus_time(date_str).date()
+    # for xml-rpc, all numbers use decimal commas (Germany),
+    # but in Python we prefer decimal comma
+
+    amount_num = fix_regional(amount_num)
     # Amount conversion:
-    # input is java class 'java.lang.Double': Convert to python str first
+    # for H2 db query, the input is java class 'java.lang.Double':
+    # Convert to python str first
     # before passing it to Decimal constructor,
     # to avoid rounding error
     amount_dec = decimal.Decimal(str(amount_num))
@@ -186,6 +243,8 @@ def build_transaction(
     meta = data.new_metadata("<build_transaction>", 0)
     # add hibiscus unique transaction id as metadata
     meta["huid"] = str(uid)
+    # if int(uid) == 2952:
+    #    input(row)
     # There's no distinct payee.
     payee = None
     return data.Transaction(
@@ -200,6 +259,17 @@ def build_transaction(
     )
 
 
+def fix_regional(str_num: Union[str, any]) -> float:
+    """Ugly method to fix regionalization for numbers in XML.
+    This replaced ',' with '.'
+    str_num can also be of class java.lang.Double (obj),
+    in case of H2 DB query
+    """
+    if isinstance(str_num, str) and not str_num.isdigit() and "," in str_num:
+        return str_num.replace(",", ".")
+    return str_num
+
+
 def parse_hibiscus_time(date_str):
     """Parse an hibiscus time string and return a datetime object.
 
@@ -211,6 +281,46 @@ def parse_hibiscus_time(date_str):
     if len(date_str) != 10:
         raise ValueError(f"Malformed date: {date_str}")
     return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+
+
+def clean_filters(filters):
+    """
+    Remove keys with None values from the filter dictionary.
+    """
+    return {k: v for k, v in filters.items() if v is not None}
+
+
+def connect_rpc():
+    """Connect to Hibiscus via XML-RPC interface"""
+    # Define the server URL
+    server_url = "http://127.0.0.1:8080/xmlrpc"
+    try:
+        # Create a server proxy object
+        server = xmlrpc.client.ServerProxy(
+            server_url,
+            allow_none=True,
+            verbose=False,  # set to True for debugging XML-RPC
+        )
+
+        raw_filters = {
+            "konto_id": None,  # Filter by account id
+            "datum:min": "2024-01-20",  # Start date (YYYY-MM-DD)
+            "datum:max": "2024-12-31",  # End date (YYYY-MM-DD)
+            "verwendungszweck": None,  # Filter by purpose text
+            "valuta:min": None,  # Minimum amount
+            "valuta:max": None,  # Maximum amount
+        }
+
+        # clean filters to remove None values
+        filter_criteria = clean_filters(raw_filters)
+
+        transactions = server.hibiscus.xmlrpc.umsatz.list(filter_criteria)
+
+    except xmlrpc.client.Fault as fault:
+        print(f"XML-RPC Fault occurred: {fault}")
+    except xmlrpc.client.ProtocolError as err:
+        print(f"A protocol error occurred: {err.url} - {err.errcode} {err.errmsg}")
+    return transactions
 
 
 def connect_h2(
