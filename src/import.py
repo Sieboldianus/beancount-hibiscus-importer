@@ -6,10 +6,11 @@ https://github.com/beancount/beangulp/tree/master/examples
 import beangulp
 from importers import hibiscus
 
-# select below whether to query Hibiscus from "H2" or via "RPC"
-# the first two args have no effect at the moment
+
 importers = [
-    hibiscus.Importer("Assets:EUR:Hibiscus", "EUR", "H2"),
+    # select whether to query
+    # Hibiscus from "H2" or via "RPC"
+    hibiscus.Importer(source="H2", ignore_already_processed=True),
 ]
 
 

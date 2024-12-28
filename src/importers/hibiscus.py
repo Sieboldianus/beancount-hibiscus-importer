@@ -34,25 +34,28 @@ class Importer(beangulp.Importer):
     """An importer for H2DB Hibiscus Database."""
 
     def __init__(
-        self,
-        importer_account,
-        processed_huids: Optional[str] = None,
-        source: Optional[str] = None,
+        self, source: Optional[str] = None, ignore_already_processed: bool = None
     ):
         """Create a new importer posting to the given H2DB.
 
         Args:
-          importer_account: An optional account string that is not relevant currently
-          processed_huids: An optional filepath, with hibiscus uids already processed.
           source: specify whether to query from H2 database or via XML-RPC
+          ignore_already_processed: will ignore all hibiscus unique ids already imported
+            based on PROCESSED_HUIDS_FILE
         """
         # Credentials and JAR path and other parameters from .env
         load_dotenv()
-        self.importer_account = importer_account
+        # this value is set as the header on export; it is usually not relevant,
+        # as individual transactions are assigned to beancount accounts via .accounts
+        self.importer_account = "Assets:EUR:Hibiscus"
         # define hibiscus account IDs to filter
         self.hibiscus_account_ids: Dict[int, str] = get_accounts()
-        self.processed_huids = get_processed_huids(processed_huids)
+        self.processed_huids = set()
+        self.ignore_already_processed = ignore_already_processed
+        if ignore_already_processed:
+            self.processed_huids = get_processed_huids()
         self.source: str = "H2"
+
         # self.source: str = "RPC"
         if source is not None:
             self.source = source
@@ -84,7 +87,12 @@ class Importer(beangulp.Importer):
             transactions_raw = get_from_h2(filepath, self.hibiscus_account_ids)
         else:
             raise ValueError(f"Source {self.source} not supported.")
-        return extract_transactions(transactions_raw, self.hibiscus_account_ids)
+        return extract_transactions(
+            transactions_raw,
+            self.hibiscus_account_ids,
+            self.processed_huids,
+            self.ignore_already_processed,
+        )
 
 
 def get_from_rpc(
@@ -98,7 +106,8 @@ def get_from_rpc(
 
 
 def get_from_h2(
-    filepath, hibiscus_account_ids
+    filepath,
+    hibiscus_account_ids,
 ) -> List[Dict[str, Union[str, int, float]]]:
     """Get Hibiscus transactions from H2 db. This method does not support importing
     categories.
@@ -141,7 +150,9 @@ def build_dict(rows, field_names):
     return [dict(zip(field_names, values)) for values in rows]
 
 
-def extract_transactions(rows, hibiscus_account_ids):
+def extract_transactions(
+    rows, hibiscus_account_ids, already_processed_huids, ignore_already_processed
+):
     """Extract transactions from an Hibiscus H2DB.
 
     Args:
@@ -154,11 +165,16 @@ def extract_transactions(rows, hibiscus_account_ids):
     https://www.willuhn.de/wiki/doku.php?id=develop:xmlrpc:umsatz
     """
     new_entries = []
+    skipped = 0
     total_items = len(rows)
+    newly_processed_huids = set()
     logging.info("Starting to process %d items.", total_items)
     for cnt, row in enumerate(rows):
-        uid = row.get("id")
-        logging.debug("Processing item %d of %d, row UID: %s", cnt, total_items, uid)
+        huid = row.get("id")
+        if ignore_already_processed and str(huid) in already_processed_huids:
+            skipped += 1
+            continue
+        logging.debug("Processing item %d of %d, row UID: %s", cnt, total_items, huid)
         # test whether it is a balance or transaction
         amount_num = row.get("betrag")
         balance = row.get("saldo")
@@ -169,33 +185,48 @@ def extract_transactions(rows, hibiscus_account_ids):
         balance = fix_regional(balance)
 
         if bean_account is None:
-            # skip entry
+            # skip accounts not in mapping
             continue
         # convert over float to int, to prevent
         # ValueError: invalid literal for int() with base 10
         if int(float(amount_num)) == 0 and float(balance) > 0:
             # create balance entry
-            logging.debug("Processing balance entry")
-            date_str = row.get("datum")
-            date = parse_hibiscus_time(date_str).date()
-            balance = row.get("saldo")
-            balance_dec = decimal.Decimal(str(balance))
-            units = amount.Amount(balance_dec, "EUR")
-            # Build the transaction with a single leg.
-            meta = data.new_metadata("<build_transaction>", 0)
-            # add hibiscus unique transaction id as metadata
-            meta = {"lineno": uid, "filename": "hibiscus"}
-            balance_entry = data.Balance(meta, date, bean_account, units, None, None)
+            balance_entry = build_balance(row, bean_account)
             new_entries.append(balance_entry)
-            # if int(uid) == 2952:
-            #     input(balance_entry)
+            newly_processed_huids.add(huid)
             continue
         # process transaction
         entry = build_transaction(row, hibiscus_account_ids)
         new_entries.append(entry)
-
+        # add huid to set of newly processed huids, to be written to cache later
+        newly_processed_huids.add(huid)
     logging.info("Finished processing all items.")
+    logging.info(
+        "Skipped %d already processed items, based on the Hibiscus uid.", skipped
+    )
+    if ignore_already_processed:
+        write_processed_huids(newly_processed_huids)
     return data.sorted(new_entries)
+
+
+def build_balance(
+    row: Tuple[Union[float, int, str]],
+    bean_account: str,
+) -> data.Balance:
+    """Build a single balance"""
+    logging.debug("Processing balance entry")
+    huid = row.get("id")
+    date_str = row.get("datum")
+    date = parse_hibiscus_time(date_str).date()
+    balance = row.get("saldo")
+    balance_dec = decimal.Decimal(str(balance))
+    units = amount.Amount(balance_dec, "EUR")
+    # Build the transaction with a single leg.
+    meta = data.new_metadata("<build_transaction>", 0)
+    # add hibiscus unique transaction id as metadata
+    meta = {"lineno": huid, "filename": "hibiscus"}
+    balance_entry = data.Balance(meta, date, bean_account, units, None, None)
+    return balance_entry
 
 
 def build_transaction(
@@ -206,8 +237,7 @@ def build_transaction(
 
     Args:
       row: A tuple with the transaction information.
-      field_names: A dictionary to get the tuple-index for column names.
-      account: An account string, the account to insert.
+      hibiscus_account_ids: A dictionary to get the brancount account.
       currency: A currency string.
     Returns:
       A Transaction instance.
@@ -390,11 +420,38 @@ def get_accounts() -> Dict[int, str]:
     return accounts_map
 
 
-def get_processed_huids(filepath: Path):
+def get_huids_file():
+    """Get filepath for huids file via env"""
+    processed_huids_file = Path.cwd() / os.getenv("PROCESSED_HUIDS_FILE")
+    if not processed_huids_file.parents[0].is_dir():
+        raise ValueError(f"HUIDs file: {processed_huids_file} folder not found.")
+    if not processed_huids_file.exists():
+        # create file if it does not exist
+        processed_huids_file.touch()
+    return processed_huids_file
+
+
+def get_processed_huids():
     """Get list of already processed hibiscus uids"""
-    return
+    processed_huids = set()
+    file_path = get_huids_file()
+    with open(file_path, mode="r", newline="", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+        processed_huids.update(lines)
+    return processed_huids
+
+
+def write_processed_huids(newly_processed_huids):
+    """Append a list of newly processed hibiscus uids"""
+    file_path = get_huids_file()
+    if not file_path.exists():
+        raise ValueError(f"HUIDs file: {file_path} not found.")
+    with open(file_path, mode="a", newline="", encoding="utf-8") as f:
+        for huid in newly_processed_huids:
+            f.write(f"{huid}\n")
 
 
 if __name__ == "__main__":
-    importer = Importer("Assets:EUR:Hibiscus")
+    # hook for tests
+    importer = Importer(source="H2", ignore_already_processed=False)
     main(importer)

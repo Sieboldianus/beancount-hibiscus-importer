@@ -60,10 +60,11 @@ python import.py extract ./path/to/h2db > tmp.beancount
 - The Hibiscus H2 DB is opened in read-only mode.
 - Choose either `H2`, to query the Hibiscus database directly, or `RPC`, to query via the Hibiscus XML-RPC interface (see below)
 
+## Notes
 
-**Not implemented**: If you use Hibiscus to categorize transactions, these categories are not yet used to categorize the second leg of beancount transactions (e.g. expense accounts).
-
-**Language conventions**: The code is primarily written in English. All references to Hibiscus (e.g. H2 column names) are kept in German.
+- Only one connection per H2DD is allowed. Close Hibiscus before importing to beancount from the H2DB
+- **Not implemented**: If you use Hibiscus to categorize transactions, these categories are not yet used to categorize the second leg of beancount transactions (e.g. expense accounts).
+- **Language conventions**: The code is primarily written in English. All references to Hibiscus (e.g. H2 column names) are kept in German.
 
 ## XML-RPC
 
