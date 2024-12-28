@@ -26,9 +26,6 @@ logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# supress DeprecationWarning in imported package jpype
-logging.captureWarnings(False)
-
 
 class Importer(beangulp.Importer):
     """An importer for H2DB Hibiscus Database."""
@@ -55,7 +52,6 @@ class Importer(beangulp.Importer):
         if ignore_already_processed:
             self.processed_huids = get_processed_huids()
         self.source: str = "H2"
-
         # self.source: str = "RPC"
         if source is not None:
             self.source = source
