@@ -55,6 +55,7 @@ python import.py extract ./path/to/h2db > tmp.beancount
   huid: "22"
   Assets:EUR:DKB:Gemeinschaftskonto  -23.94 EUR
 ```
+- **Duplicate detection**: `huid`s are also used to avoid importing hibiscus transactions multiple times. A cache of already processed `huid`s is kept in `PROCESSED_HUIDS_FILE`. This feature can be turned off in the importer function (set `ignore_already_processed=False`)
 - **Account Mappings**: Multiple Hibiscus Accounts are mapped to Beancount accounts through [hibiscus/.accounts](hibiscus/.accounts).
 - **Balances** and **Transactions** are currently imported from Hibiscus
 - The Hibiscus H2 DB is opened in read-only mode.
