@@ -10,8 +10,7 @@ On Linux or Windows Subsystem for Linux (WSL1 or 2), follow these steps to insta
 
 First make sure Java is available.
 ```bash
-sudo apt update
-sudo apt install default-jre
+apt update && apt install default-jre
 java -version
 > openjdk version "11.0.25" 2024-10-15
 ```
@@ -41,10 +40,11 @@ Run the tests:
 bash src/importers/runtests.sh
 ```
 
-Run the importer:
+Run the importer. Beangulp will hook all `.mv.db` (Hibiscus H2DB) 
+files to the Hibiscus importer:
 ```bash
-python import.py identify ./downloads
-python import.py extract ./downloads > tmp.beancount
+python import.py identify ./path/to/h2db
+python import.py extract ./path/to/h2db > tmp.beancount
 ```
 
 ## Features
@@ -67,8 +67,13 @@ python import.py extract ./downloads > tmp.beancount
 
 ## XML-RPC
 
-Query of automated transaction categories from Hibiscus is only possible via XML-RPC protocol, 
-as automated categories are not stored in the H2 itself. See [the documentation](https://www.willuhn.de/wiki/doku.php?id=develop:xmlrpc).
+Querying automated transaction categories from Hibiscus is only possible via XML-RPC protocol, 
+as automated categories are not stored in H2 itself. See 
+[the documentation](https://www.willuhn.de/wiki/doku.php?id=develop:xmlrpc). You can still 
+query Hibiscus categories from H2DB after transactions have been verified in Hibiscus. I 
+still wanted to be able to query via XML-RPC, as this also allows connecting to Hibiscus 
+running on a remote server. Note that the XML-RPC mapping of values is currently not included 
+in the tests.
 
 Setup:
 
