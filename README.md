@@ -77,7 +77,7 @@ I still wanted to be able to query via XML-RPC, as this also allows connecting t
 running on a remote server. Note that the XML-RPC mapping of values is currently not included 
 in the tests and the processing of values is a bit rough (`str`, `int`, and `float` conversion; regionalization).
 
-Setup:
+<details><summary>Setup of Hibiscus XML-RPC connection</summary>
 
 Datei > Einstellungen > Verfügbare Plugins > `<Alle Repositories>` auswählen
 - `hibiscus.xmlrpc` finden und installieren, installiert dependencies:
@@ -88,3 +88,5 @@ Datei > Einstellungen > HTTP
 - Server binden an: `127.0.0.1`
 - no HTTPS
 - no auth
+
+</details>
