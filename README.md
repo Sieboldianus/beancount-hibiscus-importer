@@ -70,10 +70,12 @@ python import.py extract ./path/to/h2db > tmp.beancount
 Querying automated transaction categories from Hibiscus is only possible via XML-RPC protocol, 
 as automated categories are not stored in H2 itself. See 
 [the documentation](https://www.willuhn.de/wiki/doku.php?id=develop:xmlrpc). You can still 
-query Hibiscus categories from H2DB after transactions have been verified in Hibiscus. I 
-still wanted to be able to query via XML-RPC, as this also allows connecting to Hibiscus 
+query Hibiscus categories from the H2DB after transactions have been manually set to `verified` in Hibiscus 
+(make sure to confirm hard-linking categories in this case). 
+
+I still wanted to be able to query via XML-RPC, as this also allows connecting to Hibiscus 
 running on a remote server. Note that the XML-RPC mapping of values is currently not included 
-in the tests.
+in the tests and the processing of values is a bit rough (`str`, `int`, and `float` conversion; regionalization).
 
 Setup:
 
