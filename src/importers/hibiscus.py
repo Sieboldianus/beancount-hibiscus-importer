@@ -84,12 +84,15 @@ class Importer(beangulp.Importer):
 
     def extract(self, filepath, existing):
         """Extract a list of transactions from the H2 DB."""
+        # get optional env vars
+        limit = os.getenv("LIMIT_ENTRIES")
         if self.source == "RPC":
             transactions_raw = get_from_rpc(
                 hibiscus_account_ids=self.hibiscus_account_ids
             )
         elif self.source == "H2":
-            transactions_raw = get_from_h2(filepath, self.hibiscus_account_ids)
+            transactions_raw = get_from_h2(
+                filepath, self.hibiscus_account_ids, limit)
         else:
             raise ValueError(f"Source {self.source} not supported.")
         return extract_transactions(
@@ -113,12 +116,18 @@ def get_from_rpc(
 def get_from_h2(
     filepath,
     hibiscus_account_ids,
+    limit: int = None
 ) -> List[Dict[str, Union[str, int, float]]]:
-    """Get Hibiscus transactions from H2 db. This method does not support importing
-    categories.
+    """Get Hibiscus transactions from H2 db.
+
     Args:
         filepath: Path to H2 DB
-        hibiscus_account_ids: Account IDs to filter"""
+        hibiscus_account_ids: Account IDs to filter
+        limit: Number of items to return from the H2 DB (optional)
+    """
+    limit_sql= ""
+    if limit:
+        limit_sql = f"LIMIT {limit}"
     with connect_h2(filepath) as conn:
         curs = conn.cursor()
         sql_str = f"""
@@ -128,7 +137,7 @@ def get_from_h2(
             {','.join([str(n) for n in hibiscus_account_ids])}
             )
             ORDER BY ID ASC
-            LIMIT 300
+            {limit_sql}
             """
 
         curs.execute(sql_str)
