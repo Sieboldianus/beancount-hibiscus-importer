@@ -6,6 +6,7 @@ __license__ = "GNU GPLv2"
 
 
 import csv
+import subprocess
 import xmlrpc.client
 import datetime
 import decimal
@@ -58,8 +59,12 @@ class Importer(beangulp.Importer):
 
     def date(self, filepath):
         """Implement beangulp.Importer::date()"""
-        last_mod_time = Path(filepath).stat().st_mtime
-        return datetime.datetime.fromtimestamp(last_mod_time).date()
+        # try to get last mod date via git first
+        git_last_mod_time = get_last_git_mod(filepath)
+        if git_last_mod_time is None:
+            file_last_mod_time = Path(filepath).stat().st_mtime
+            return datetime.datetime.fromtimestamp(file_last_mod_time).date()
+        return git_last_mod_time
 
     def identify(self, filepath: Path):
         """Check for Hibiscus H2DB file name ending"""
@@ -446,6 +451,23 @@ def write_processed_huids(newly_processed_huids):
         for huid in newly_processed_huids:
             f.write(f"{huid}\n")
 
+
+def get_last_git_mod(filepath: Path) -> datetime.datetime.date:
+   """Get last git mode time for filepath"""
+   # try to get last mod date via git first
+   try:
+       git_last_mod_time = subprocess.run(
+           ['git', 'log', '-1', '--pretty="format:%ci"', filepath],
+           check=True, text=True, stdout=subprocess.PIPE)
+   except:
+       return
+   git_last_mod_time = git_last_mod_time.stdout.split('\n')[0]
+   date_format = "%Y-%m-%d %H:%M:%S %z"
+   # cleanup
+   git_last_mod_time = git_last_mod_time.removeprefix('"format:')
+   git_last_mod_time = git_last_mod_time.removesuffix('"')
+   # Convert to datetime object
+   return datetime.datetime.strptime(git_last_mod_time, date_format).date()
 
 if __name__ == "__main__":
     # hook for tests
