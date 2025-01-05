@@ -3,3 +3,4 @@ __pycache__
 tmp.beancount
 .env
 hibiscus/.huids_processed
+src/importers_tests/hibiscus/hibiscus.trace.db
