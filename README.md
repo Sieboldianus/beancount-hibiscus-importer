@@ -52,7 +52,7 @@ python import.py extract ./path/to/h2db > tmp.beancount
 
 - **Balances** and **Transactions** are currently imported from Hibiscus
 - The Hibiscus H2 DB is opened in read-only mode.
-- **Hibiscus Unique IDs**: The Hibiscus H2DB uses unique IDs to deduplicate transactions. These UIDs are used by the importer to avoid duplicate imports. They are called `huid` (**h**ibiscus **u**nique **id**s). The `huid`s are added as metadata to beancount transactions to keep a reference to the Hibiscus database:
+- **Hibiscus Unique IDs**: The Hibiscus H2DB uses unique IDs to deduplicate transactions. These UIDs are used by the importer to avoid duplicate imports. They are called `HUID` (**H**ibiscus **U**nique **ID**s). The `huid`s are added as metadata to beancount transactions to keep a reference to the Hibiscus database:
   ```
   2023-12-11 * "LAG INTERNET SERVICES GMB FIBU 52344 RENR 3021233243280"
     huid: "22"
