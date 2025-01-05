@@ -249,8 +249,17 @@ def extract_transactions(
     else:
         logging.info(
             "Already processed items are not skipped this time.")
+    # reconcile and merge internal transactions
+    reconciled_entries = merge_transactions(new_entries)
     return data.sorted(new_entries)
 
+def merge_transactions(
+        entries: List[Union[data.Transaction, data.Balance]]) -> List[Union[data.Transaction, data.Balance]]:
+    """Walk through list of transactions and merge those
+    that come from two (internal) accounts
+    """
+    reconciled_entries = entries
+    return reconciled_entries
 
 def build_balance(
     row: Tuple[Union[float, int, str]],
@@ -289,7 +298,7 @@ def build_transaction(
 
     uid = row.get("id")  # hibiscus unique id (cross-account)
     hibiscus_account_id = int(row.get("konto_id"))
-    payee_account = row.get("empfaenger_konto")  # empfaenger_name
+    payee_account_ref = row.get("empfaenger_konto")  # empfaenger_name
     amount_num = row.get("betrag")
     narration = row.get("zweck")
     date_str = row.get("datum")  # Buchungsdatum
@@ -297,7 +306,6 @@ def build_transaction(
 
     # Create Transaction directives.
     bean_account = hibiscus_account_ids.get(hibiscus_account_id)
-
     currency = "EUR"
 
     date = parse_hibiscus_time(date_str).date()
@@ -319,16 +327,18 @@ def build_transaction(
     meta["huid"] = str(uid)
     # if int(uid) == 2952:
     #    input(row)
+    postings = [posting]
     payee_posting = None
-    payee_account = hibiscus_payees.get(payee_account)
+    # check if this is an internal transaction
+    # between own hibiscus accounts
+    payee_account = hibiscus_payees.get(payee_account_ref)
     if payee_account is not None:
         # build second leg of posting
-        payee_posting = data.Posting(payee_account, -units, None, None, None, None)
+        payee_posting = data.Posting(
+            payee_account, -units, None, None, None, None)
+        postings.append(payee_posting)
     # There's no distinct payee.
     payee = None
-    postings = [posting]
-    if payee_posting is not None:
-        postings.append(payee_posting)
     return data.Transaction(
         meta,
         date,
