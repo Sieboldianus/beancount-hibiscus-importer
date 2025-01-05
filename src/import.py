@@ -10,7 +10,7 @@ from importers import hibiscus
 importers = [
     # select whether to query
     # Hibiscus from "H2" or via "RPC"
-    hibiscus.Importer(source="H2", ignore_already_processed=True),
+    hibiscus.Importer(source="H2"),
 ]
 
 

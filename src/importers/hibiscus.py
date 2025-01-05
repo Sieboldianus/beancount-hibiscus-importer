@@ -49,8 +49,12 @@ class Importer(beangulp.Importer):
         # define hibiscus account IDs to filter
         self.hibiscus_account_ids: Dict[int, str] = get_accounts()
         self.processed_huids = set()
-        self.ignore_already_processed = ignore_already_processed
-        if ignore_already_processed:
+        # get from env, will override what is given to init()
+        if ignore_already_processed is not None:
+            self.ignore_already_processed = ignore_already_processed
+        else:
+            self.ignore_already_processed = os.getenv("IGNORE_ALREADY_PROCESSED")
+        if self.ignore_already_processed:
             self.processed_huids = get_processed_huids()
         self.source: str = "H2"
         # self.source: str = "RPC"
@@ -175,7 +179,7 @@ def extract_transactions(
         if ignore_already_processed and str(huid) in already_processed_huids:
             skipped += 1
             continue
-        logging.debug("Processing item %d of %d, row UID: %s", cnt, total_items, huid)
+        logging.debug("Processing item %d of %d, row HUID: %s", cnt, total_items, huid)
         # test whether it is a balance or transaction
         amount_num = row.get("betrag")
         balance = row.get("saldo")
@@ -202,11 +206,15 @@ def extract_transactions(
         # add huid to set of newly processed huids, to be written to cache later
         newly_processed_huids.add(huid)
     logging.info("Finished processing all items.")
-    logging.info(
-        "Skipped %d already processed items, based on the Hibiscus uid.", skipped
-    )
+
     if ignore_already_processed:
+        logging.info(
+            "Skipped %d already processed items, based on the Hibiscus uid.", skipped
+        )
         write_processed_huids(newly_processed_huids)
+    else:
+        logging.info(
+            "Already processed items are not skipped this time.")
     return data.sorted(new_entries)
 
 
