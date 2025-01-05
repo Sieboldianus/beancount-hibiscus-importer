@@ -204,7 +204,7 @@ def extract_transactions(
     logging.info("Starting to process %d items.", total_items)
     for cnt, row in enumerate(rows):
         huid = row.get("id")
-        if ignore_already_processed and str(huid) in already_processed_huids:
+        if (ignore_already_processed == True) and str(huid) in already_processed_huids:
             skipped += 1
             continue
         logging.debug("Processing item %d of %d, row HUID: %s", cnt, total_items, huid)
@@ -235,7 +235,7 @@ def extract_transactions(
         newly_processed_huids.add(huid)
     logging.info("Finished processing all items.")
 
-    if ignore_already_processed:
+    if ignore_already_processed == True:
         logging.info(
             "Skipped %d already processed items, based on the Hibiscus uid.", skipped
         )
