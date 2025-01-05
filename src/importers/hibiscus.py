@@ -85,14 +85,21 @@ class Importer(beangulp.Importer):
     def extract(self, filepath, existing):
         """Extract a list of transactions from the H2 DB."""
         # get optional env vars
-        limit = os.getenv("LIMIT_ENTRIES")
+        limit_count = os.getenv("LIMIT_ENTRIES")
+        if limit_count is not None:
+            limit_count = int(limit_count)
+        limit_since = os.getenv("SINCE_DATE")
+        limit_huid = os.getenv("SINCE_HUID")
+        if limit_huid is not None:
+            limit_huid = int(limit_huid)
         if self.source == "RPC":
             transactions_raw = get_from_rpc(
                 hibiscus_account_ids=self.hibiscus_account_ids
             )
         elif self.source == "H2":
             transactions_raw = get_from_h2(
-                filepath, self.hibiscus_account_ids, limit)
+                filepath, self.hibiscus_account_ids, limit_count, limit_since,
+                limit_huid)
         else:
             raise ValueError(f"Source {self.source} not supported.")
         return extract_transactions(
@@ -116,18 +123,28 @@ def get_from_rpc(
 def get_from_h2(
     filepath,
     hibiscus_account_ids,
-    limit: int = None
+    limit_count: Optional[int] = None,
+    limit_since: Optional[str] = None,
+    limit_huid: Optional[int] = None,
 ) -> List[Dict[str, Union[str, int, float]]]:
     """Get Hibiscus transactions from H2 db.
 
     Args:
         filepath: Path to H2 DB
         hibiscus_account_ids: Account IDs to filter
-        limit: Number of items to return from the H2 DB (optional)
+        limit_count: Number of items to return from the H2 DB (optional)
+        limit_since: Limit by date (optional)
+        limit_huid: Limit by HUID (optional)
     """
     limit_sql= ""
-    if limit:
-        limit_sql = f"LIMIT {limit}"
+    if limit_count:
+        limit_sql = f"LIMIT {limit_count}"
+    limit_since_sql = ""
+    if limit_since:
+        limit_since_sql = f"AND DATUM > '{limit_since}'"
+    limit_huid_sql = ""
+    if limit_huid:
+        limit_huid_sql = f"AND ID > '{limit_huid}'"
     with connect_h2(filepath) as conn:
         curs = conn.cursor()
         sql_str = f"""
@@ -136,6 +153,8 @@ def get_from_h2(
             WHERE KONTO_ID in (
             {','.join([str(n) for n in hibiscus_account_ids])}
             )
+            {limit_since_sql}
+            {limit_huid_sql}
             ORDER BY ID ASC
             {limit_sql}
             """
