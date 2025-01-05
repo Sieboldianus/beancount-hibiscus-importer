@@ -47,7 +47,9 @@ class Importer(beangulp.Importer):
         # as individual transactions are assigned to beancount accounts via .accounts
         self.importer_account = "Assets:EUR:Hibiscus"
         # define hibiscus account IDs to filter
-        self.hibiscus_account_ids: Dict[int, str] = get_accounts()
+        accounts_map, payee_map = get_accounts()
+        self.hibiscus_account_ids: Dict[int, str] = accounts_map
+        self.hibiscus_payees: Dict[int, str] = payee_map
         self.processed_huids = set()
         # get from env, will override what is given to init()
         if ignore_already_processed is not None:
@@ -107,6 +109,7 @@ class Importer(beangulp.Importer):
             self.hibiscus_account_ids,
             self.processed_huids,
             self.ignore_already_processed,
+            self.hibiscus_payees
         )
 
 
@@ -184,13 +187,16 @@ def build_dict(rows, field_names):
 
 
 def extract_transactions(
-    rows, hibiscus_account_ids, already_processed_huids, ignore_already_processed
+    rows, hibiscus_account_ids, already_processed_huids, ignore_already_processed,
+    hibiscus_payees: Dict[str, str],
 ):
     """Extract transactions from an Hibiscus H2DB.
 
     Args:
-      field_names: Dictionary of fieldnames: col reference.
+      rows: DB Rows to process
       hibiscus_account_ids: A list of hibiscus account ids mapped to beancount accounts
+      already_processed_huids: Set of HUIDs already processed
+      hibiscus_payees: Optional mapping of payees (empfaenger) to beancount accounts
     Returns:
       A sorted list of entries.
 
@@ -229,7 +235,7 @@ def extract_transactions(
             newly_processed_huids.add(huid)
             continue
         # process transaction
-        entry = build_transaction(row, hibiscus_account_ids)
+        entry = build_transaction(row, hibiscus_account_ids, hibiscus_payees)
         new_entries.append(entry)
         # add huid to set of newly processed huids, to be written to cache later
         newly_processed_huids.add(huid)
@@ -269,6 +275,7 @@ def build_balance(
 def build_transaction(
     row: Tuple[Union[float, int, str]],
     hibiscus_account_ids: Dict[int, str],
+    hibiscus_payees: Dict[str, str],
 ) -> data.Transaction:
     """Build a single transaction.
 
@@ -282,11 +289,11 @@ def build_transaction(
 
     uid = row.get("id")  # hibiscus unique id (cross-account)
     hibiscus_account_id = int(row.get("konto_id"))
-    name = row.get("empfaenger_konto")  # empfaenger_name
+    payee_account = row.get("empfaenger_konto")  # empfaenger_name
     amount_num = row.get("betrag")
     narration = row.get("zweck")
     date_str = row.get("datum")  # Buchungsdatum
-    # payee =                 # empfaenger_name
+    # payee_name =                 # empfaenger_name
 
     # Create Transaction directives.
     bean_account = hibiscus_account_ids.get(hibiscus_account_id)
@@ -312,8 +319,16 @@ def build_transaction(
     meta["huid"] = str(uid)
     # if int(uid) == 2952:
     #    input(row)
+    payee_posting = None
+    payee_account = hibiscus_payees.get(payee_account)
+    if payee_account is not None:
+        # build second leg of posting
+        payee_posting = data.Posting(payee_account, -units, None, None, None, None)
     # There's no distinct payee.
     payee = None
+    postings = [posting]
+    if payee_posting is not None:
+        postings.append(payee_posting)
     return data.Transaction(
         meta,
         date,
@@ -322,7 +337,7 @@ def build_transaction(
         narration,
         data.EMPTY_SET,
         data.EMPTY_SET,
-        [posting],
+        postings,
     )
 
 
@@ -433,28 +448,32 @@ def connect_h2(
         raise
 
 
-def get_accounts() -> Dict[int, str]:
+def get_accounts() -> Tuple[Dict[int, str], Dict[str, str]]:
     """Get Accounts mapping from Hibiscus to Beancount Accounts
     from CSV
 
-    Returns a Dictionary:
+    Returns two dictionaries:
         hibiscus_account_id:beancount_account_string
+        hibiscus_payee_ref:beancount_account_string
     """
     file_path = Path.cwd() / os.getenv("ACCOUNTS_MAPPING_CSV")
     accounts_map = {}
+    payee_map = {}
     if not file_path.exists():
         raise ValueError(f"Accounts file: {file_path} not found.")
     with open(file_path, mode="r", newline="", encoding="utf-8") as csvfile:
         next(csvfile)
         reader = csv.reader(csvfile)
-        for key, value in reader:
+        for key, value, payee in reader:
             if key.startswith("#"):
                 continue
             if not key.isdigit():
                 # account ID should be int
                 raise ValueError(f"Malformed Hibiscus account id: {key}")
             accounts_map[int(key)] = value
-    return accounts_map
+            if payee:
+                payee_map[payee] = value
+    return accounts_map, payee_map
 
 
 def get_huids_file():
