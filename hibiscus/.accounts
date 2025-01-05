@@ -1,4 +1,4 @@
 hibiscus account id, beancount account, payee_ref
-1,Assets:EUR:DKB:Giro,
-2,Assets:EUR:Comdirect:Giro,987654321
+1,Assets:EUR:DKB:Giro,DE68500105178297336485
+2,Assets:EUR:Comdirect:Giro,DE67500105177653175993
 # 3,Assets:EUR:Paypal:Personal,paypal_mail@gmail.com
