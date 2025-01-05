@@ -62,7 +62,7 @@ python import.py extract ./path/to/h2db > tmp.beancount
 - **Account Mappings**: Multiple Hibiscus Accounts are mapped to Beancount accounts through [hibiscus/.accounts](hibiscus/.accounts) (set via `ACCOUNTS_MAPPING_CSV`).
 - Choose either `H2`, to query the Hibiscus database directly, or `RPC`, to query via the Hibiscus XML-RPC interface (see below)
 - A number features are implemented to restrict querying H2 transactions, e.g. limit by number of entries (`LIMIT_ENTRIES`), by last date (`SINCE_DATE`), or by HUID (`SINCE_HUID`).
-- **Categories Mapping**: This is what Martin Blais calls the second leg of transactions. Beancount Hibiscus Importer can add some of these category accounts. For example, for internal transfers between accounts, it will add the second leg automatically. For this to work, you need to provide a `payee_ref` in [hibiscus/.accounts](hibiscus/.accounts) (third column). The `payee_ref` is what is shown as _Empfänger Konto_ in Hibiscus H2 DB (usually your IBAN, Paypal email etc.).
+- **Categories Mapping**: This is what Martin Blais calls the second leg of the transaction. Beancount Hibiscus Importer can add some of these category accounts. For example, for internal transfers between your own accounts, it will automatically add the second leg. For this to work, you need to specify a `payee_ref` in [hibiscus/.accounts](hibiscus/.accounts) (third column). The `payee_ref` is what is shown in the Hibiscus H2 DB as the _recipient account_ (usually your IBAN, Paypal email, etc.).
   ```
   2023-12-11 * "Umbuchung             DATUM 11.12.2023, 06.23 UHR"
     huid: "21"
