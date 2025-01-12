@@ -52,23 +52,25 @@ python import.py extract ./path/to/h2db > tmp.beancount
 
 - **Balances** and **Transactions** are currently imported from Hibiscus
 - The Hibiscus H2 DB is opened in read-only mode.
-- **Hibiscus Unique IDs**: The Hibiscus H2DB uses unique IDs to deduplicate transactions. These UIDs are used by the importer to avoid duplicate imports. They are called `HUID` (**H**ibiscus **U**nique **ID**s). The `huid`s are added as metadata to beancount transactions to keep a reference to the Hibiscus database:
+- **Hibiscus Unique IDs**: The Hibiscus H2DB uses unique IDs to deduplicate transactions. These UIDs are used by the importer to avoid duplicate imports. They are called `HUID` (**H**ibiscus **U**nique **ID**s). The `huid`s are added as metadata to beancount transactions to keep a reference to the Hibiscus database. Depending on whether this is an receiving or sending transfer, `huid_receiving` and `huid_sending` are used, e.g.:
   ```
   2023-12-11 * "LAG INTERNET SERVICES GMB FIBU 52344 RENR 3021233243280"
-    huid: "22"
+    huid_sending: "22"
     Assets:EUR:DKB:Giro  -23.94 EUR
   ```
 - **Duplicate detection**: `huid`s are also used to avoid importing hibiscus transactions multiple times. A cache of already processed `huid`s is kept in `PROCESSED_HUIDS_FILE`. This feature can be turned off in the importer function (set `ignore_already_processed=False`)
 - **Account Mappings**: Multiple Hibiscus Accounts are mapped to Beancount accounts through [hibiscus/.accounts](hibiscus/.accounts) (set via `ACCOUNTS_MAPPING_CSV`).
 - Choose either `H2`, to query the Hibiscus database directly, or `RPC`, to query via the Hibiscus XML-RPC interface (see below)
 - A number features are implemented to restrict querying H2 transactions, e.g. limit by number of entries (`LIMIT_ENTRIES`), by last date (`SINCE_DATE`), or by HUID (`SINCE_HUID`).
-- **Categories Mapping**: This is what Martin Blais calls the second leg of the transaction. Beancount Hibiscus Importer can add some of these category accounts. For example, for internal transfers between your own accounts, it will automatically add the second leg. For this to work, you need to specify a `payee_ref` in [hibiscus/.accounts](hibiscus/.accounts) (third column). The `payee_ref` is what is shown in the Hibiscus H2 DB as the _recipient account_ (usually your IBAN, Paypal email, etc.).
-  ```
-  2023-12-11 * "Umbuchung             DATUM 11.12.2023, 06.23 UHR"
-    huid: "21"
-    Assets:EUR:DKB:Giro        -10000.0 EUR
-    Assets:EUR:Comdirect:Giro   10000.0 EUR
-  ```
+- **Categories Mapping**: This is what Martin Blais calls the second leg of the transaction. Beancount Hibiscus Importer can add some of these category accounts. 
+  - **Merge of internal transactions**: Internal transfers between your own accounts, it will automatically add the second leg. For this to work, you need to specify a `payee_ref` in [hibiscus/.accounts](hibiscus/.accounts) (third column). The `payee_ref` is what is shown in the Hibiscus H2 DB as the _recipient account_ (usually your IBAN, Paypal email, etc.).
+    ```
+    2023-12-11 * "Umbuchung             DATUM 11.12.2023, 06.23 UHR"
+      huid_sending: "21"
+      huid_receiving: "25"
+      Assets:EUR:DKB:Giro        -10000.0 EUR
+      Assets:EUR:Comdirect:Giro   10000.0 EUR
+    ```
 
 
 ## Configuration
