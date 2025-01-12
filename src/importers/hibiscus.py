@@ -14,6 +14,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union, List
+from collections import defaultdict
 
 import beangulp
 import jaydebeapi
@@ -144,7 +145,7 @@ def get_from_h2(
         limit_sql = f"LIMIT {limit_count}"
     limit_since_sql = ""
     if limit_since:
-        limit_since_sql = f"AND DATUM > '{limit_since}'"
+        limit_since_sql = f"AND DATUM >= '{limit_since}'"
     limit_huid_sql = ""
     if limit_huid:
         limit_huid_sql = f"AND ID > '{limit_huid}'"
@@ -190,7 +191,7 @@ def extract_transactions(
     rows, hibiscus_account_ids, already_processed_huids, ignore_already_processed,
     hibiscus_payees: Dict[str, str],
 ):
-    """Extract transactions from an Hibiscus H2DB.
+    """Extract transactions from Hibiscus H2DB.
 
     Args:
       rows: DB Rows to process
@@ -250,16 +251,153 @@ def extract_transactions(
         logging.info(
             "Already processed items are not skipped this time.")
     # reconcile and merge internal transactions
-    reconciled_entries = merge_transactions(new_entries)
-    return data.sorted(new_entries)
+    len_before = len(new_entries)
+    reconciled_entries = merge_transactions(new_entries, hibiscus_account_ids)
+    # ToDo:
+    # reconciled_entries = merge_partial_transactions(reconciled_entries)
+    lenafter = len(reconciled_entries)
+    logging.info(
+            "Merged %d internal transactions.", len_before-lenafter)
+    return data.sorted(reconciled_entries)
+
+def filter_transactions(
+        entry: Union[data.Transaction, data.Balance]) -> data.Transaction:
+    """Returns only Transactions"""
+    if isinstance(entry, data.Transaction):
+        return data.Transaction
+
+def merge_partial_transactions(
+        entries: List[Union[data.Transaction, data.Balance]]):
+    """ToDo"""
+    # 1. detect partial transaction:
+    # one leg, one huid
+    # 2. detect incomplete transaction
+    #  with two legs but one huid
+    # check if partila transactions can be merged with incomplete
+    # optionally add a "check" (!) to the "guessed" leg
+    existing_partial_transactions = []
+    reconciled_entries = []
+    for entry in entries:
+        logging.warning(f"Partial transaction detect {entry}")
+        found_partial_match = False
+        for exists_partial_entry in existing_partial_transactions:
+            if is_equal_transaction(exists_partial_entry, entry):
+                merge_transaction(exists_partial_entry, entry)
+                found_partial_match = True
+                break
+        if not found_partial_match:
+            logging.info("Not found (partial)")
+        else:
+            continue
+        existing_partial_transactions.append(entry)
+    return reconciled_entries
 
 def merge_transactions(
-        entries: List[Union[data.Transaction, data.Balance]]) -> List[Union[data.Transaction, data.Balance]]:
+        entries: List[Union[data.Transaction, data.Balance]],
+        hibiscus_account_ids) -> List[Union[data.Transaction, data.Balance]]:
     """Walk through list of transactions and merge those
-    that come from two (internal) accounts
+    that come from two (internal) accounts, based on same amount and date
+
+    ToDo: Detect & merge partial transactions, i.e. transactions with only one leg
     """
-    reconciled_entries = entries
+
+    existing_transactions = defaultdict(list)
+        # This is a dictionary of lists:
+        # {account: [posting,
+        #            posting,
+        #            posting,]
+        #  account2:[posting,
+        #            ...,]}
+    own_accounts = set(hibiscus_account_ids.values())
+    reconciled_entries = []
+    for entry in entries:
+
+        if not isinstance(entry, data.Transaction):
+            # check ok
+            reconciled_entries.append(entry)
+            continue
+
+        if not len(entry.postings) == 2:
+            # check ok
+            reconciled_entries.append(entry)
+            continue
+        # potential candidate for internal transaction
+        first_leg = entry.postings[0]
+        second_leg = entry.postings[1]
+
+        if not second_leg.account in own_accounts:
+            # second leg account not an own account, check ok
+            reconciled_entries.append(entry)
+            continue
+
+        # check if own account already seen in previous entry
+        existing_acc = existing_transactions.get(first_leg.account)
+        # debug
+        if existing_acc is None:
+            existing_acc = existing_transactions.get(second_leg.account)
+        if existing_acc is not None:
+            found_match = False
+            for idx, exists_entry in enumerate(existing_acc):
+                if is_equal_transaction(exists_entry, entry):
+                    merge_transaction(exists_entry, entry)
+                    found_match = True
+                    del existing_acc[idx]
+                    break
+            if found_match:
+                # continue outer loop
+                continue
+
+        if second_leg.account:
+            existing_transactions[second_leg.account].append(entry)
+        else:
+            logging.warning(f"Partial transaction {entry}")
+            # no second leg account available
+        reconciled_entries.append(entry)
     return reconciled_entries
+
+def merge_transaction(first_transaction, second_transaction):
+    """Merges second_transaction onto first_transaction.
+
+    Description:
+    - assumes two matching transactions
+    - merge first_transaction by updating with the second_transaction huid-ref
+      (huid_receiving, or huid_sending)
+    - first_transaction will be modified in place (already in reconciled_entries)
+    - Optionally compares transaction description length and merges
+      the longer of the two
+    """
+    receiving = first_transaction.meta.get("huid_receiving")
+    if receiving is None:
+        first_transaction.meta["huid_receiving"] = \
+                second_transaction.meta.get("huid_receiving")
+    sending = first_transaction.meta.get("huid_sending")
+    if sending is None:
+        first_transaction.meta["huid_sending"] = \
+            second_transaction.meta.get("huid_sending")
+
+
+
+def is_equal_transaction(first_transaction, second_transaction):
+    """Compare two transactions from two accounts and return True if matching
+
+    Description: Compares if both sides refer to the same transaction;
+    - there may be a slight date difference, depending on bank transfer times;
+    - transactions will be judged as one if same accounts-ref, amount
+      and date (max 4 days difference)
+    """
+    # debug:
+    if first_transaction.meta.get("huid_sending") and first_transaction.meta.get("huid_receiving"):
+        logging.warning(
+            f"Transaction appears to be complete: {first_transaction.meta.get('huid_sending')}->{first_transaction.meta.get('huid_receiving')}")
+    if second_transaction.meta.get("huid_sending") and second_transaction.meta.get("huid_receiving"):
+        logging.warning(
+            f"Transaction appears to be complete: {second_transaction.meta.get('huid_sending')}->{second_transaction.meta.get('huid_receiving')}")
+    # comparison:
+    if (first_transaction.postings[1].units.__neg__() == second_transaction.postings[1].units) \
+        or (first_transaction.postings[0].units.__neg__() == second_transaction.postings[0].units) \
+        and (abs(first_transaction.date-second_transaction.date).days <= 4):
+        return True
+    return False
 
 def build_balance(
     row: Tuple[Union[float, int, str]],
@@ -324,9 +462,11 @@ def build_transaction(
     # Build the transaction with a single leg.
     meta = data.new_metadata("<build_transaction>", 0)
     # add hibiscus unique transaction id as metadata
-    meta["huid"] = str(uid)
-    # if int(uid) == 2952:
-    #    input(row)
+    if units.number < 0:
+        meta["huid_sending"] = str(uid)
+    else:
+        meta["huid_receiving"] = str(uid)
+
     postings = [posting]
     payee_posting = None
     # check if this is an internal transaction
